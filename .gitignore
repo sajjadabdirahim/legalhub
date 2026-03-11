@@ -1,0 +1,15 @@
+# Environments
+.env
+venv/
+__pycache__/
+
+# Frontend
+node_modules/
+build/
+
+# Data & ML Models
+*.index
+*.pt
+*.bin
+*.csv
+/ml_pipeline/data/
