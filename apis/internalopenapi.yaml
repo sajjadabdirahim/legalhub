@@ -1,0 +1,144 @@
+openapi: 3.0.3
+info:
+  title: LegalHub Internal ML Microservices API
+  version: 1.0.0
+  description: >
+    Internal REST API documentation for the LegalHub Data Ingestion, NLP Engine, and Topic Modeling pipelines. 
+    These endpoints are strictly for intra-container communication and administrative cron jobs, operating entirely behind the public gateway.
+    [Achieves Requirement MAINT.3]
+
+servers:
+  - url: http://ml-engine:8001
+    description: Internal Docker Network Server
+
+components:
+  securitySchemes:
+    InternalApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Internal-Token
+      description: "Hardcoded secret utilized by Docker containers to authenticate intra-network requests."
+
+  schemas:
+    IngestionRequest:
+      type: object
+      required:
+        - target_acts
+      properties:
+        target_acts:
+          type: array
+          items:
+            type: string
+          description: "List of exact Akoma Ntoso FRBR URIs or standard act names to scrape from new.kenyalaw.org."
+          example: ["Traffic Act", "Penal Code"]
+        force_refresh:
+          type: boolean
+          default: false
+          description: "If true, bypasses repeal quarantines and overwrites existing raw text in PostgreSQL."
+
+    TopicModelingRequest:
+      type: object
+      required:
+        - embedding_version
+      properties:
+        embedding_version:
+          type: string
+          example: "v1.2-legal-bert"
+        min_cluster_size:
+          type: integer
+          default: 15
+          description: "Dynamic calibration parameter for the HDBSCAN algorithm."
+
+    JobStatusResponse:
+      type: object
+      properties:
+        job_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [Accepted, Processing, Completed, Failed]
+        message:
+          type: string
+
+paths:
+  /internal/health:
+    get:
+      summary: Container Health Check
+      description: "Unauthenticated endpoint utilized by the Docker daemon to verify container viability and memory footprint."
+      tags:
+        - DevOps
+      responses:
+        '200':
+          description: "Microservice is healthy."
+          content:
+            application/json:
+              example: {"status": "healthy", "gpu_available": false, "ram_usage_mb": 240}
+
+  /internal/pipeline/ingest-and-embed:
+    post:
+      summary: Trigger Data Ingestion & Batch Embedding
+      description: >
+        Initiates the offline pipeline to scrape Akoma Ntoso XML files, clean the text, 
+        and execute the Legal-BERT batch embedding to generate 1x768 vectors for the FAISS index.
+        [Achieves Requirements OP 1.1, OP 1.2]
+      tags:
+        - NLP Pipeline (Sajjad)
+      security:
+        - InternalApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IngestionRequest'
+      responses:
+        '202':
+          description: "Batch job accepted and processing asynchronously."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobStatusResponse'
+
+  /internal/pipeline/train-ner:
+    post:
+      summary: Trigger BERT-CRF Fine-Tuning
+      description: >
+        Triggers the offline weak supervision loop. Calls the Gemini Pro API (EXT-2) for synthetic BIO tags, 
+        then fine-tunes the local BERT-CRF model and updates the Neo4j Knowledge Graph.
+      tags:
+        - NLP Pipeline (Sajjad)
+      security:
+        - InternalApiKeyAuth: []
+      responses:
+        '202':
+          description: "Training loop initiated."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobStatusResponse'
+
+  /internal/pipeline/cluster-topics:
+    post:
+      summary: Trigger BERTopic Clustering
+      description: >
+        Executes UMAP dimensionality reduction (768d -> 5d) and HDBSCAN density clustering on the pre-computed vectors. 
+        Updates the `latent_theme_id` column in the PostgreSQL relational database.
+        [Achieves Requirement F.2.1]
+      tags:
+        - Topic Modeling (Horris)
+      security:
+        - InternalApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TopicModelingRequest'
+      responses:
+        '202':
+          description: "Clustering algorithm initiated."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobStatusResponse'
