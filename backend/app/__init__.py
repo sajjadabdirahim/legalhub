@@ -1,0 +1,1 @@
+"""LegalHub API application package."""

@@ -1,6 +1,8 @@
 import { useState, useCallback, useEffect } from "react";
+import { toast } from "sonner";
 import { ModeProvider, useMode } from "@/contexts/ModeContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { getStoredAccessToken, postChat } from "@/lib/api";
 import { AppHeader } from "@/components/AppHeader";
 import { ChatHistorySidebar, Conversation } from "@/components/ChatHistorySidebar";
 import { AIWarningBanner } from "@/components/AIWarningBanner";
@@ -63,7 +65,7 @@ function saveMessages(email: string, convoId: string, msgs: ChatMessageData[]) {
 
 function AppContent() {
   const { isProfessional, isCitizen } = useMode();
-  const { isLoggedIn, userEmail } = useAuth();
+  const { isLoggedIn, userEmail, logout } = useAuth();
   const isMobile = useIsMobile();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -139,54 +141,85 @@ function AppContent() {
     });
   }, [userEmail, activeConvoId, createNewConversation]);
 
-  const handleSend = useCallback((text: string) => {
-    const trimmedText = text.trim();
-    if (!trimmedText) return;
+  const handleSend = useCallback(
+    async (text: string) => {
+      const trimmedText = text.trim();
+      if (!trimmedText) return;
 
-    const modeAtSend: "citizen" | "professional" = isCitizen ? "citizen" : "professional";
-    const setModeMessages = modeAtSend === "citizen" ? setCitizenMessages : setProfessionalMessages;
-    const setModeLoading = modeAtSend === "citizen" ? setCitizenLoading : setProfessionalLoading;
-
-    const userMsg: ChatMessageData = { id: Date.now().toString(), role: "user", content: trimmedText };
-
-    setModeMessages((prevMessages) => {
-      const updatedMsgs = [...prevMessages, userMsg];
-
-      if (isLoggedIn && userEmail && activeConvoId && modeAtSend === "citizen") {
-        saveMessages(userEmail, activeConvoId, updatedMsgs);
-        setConversations((prevConversations) => {
-          const convo = prevConversations.find((c) => c.id === activeConvoId);
-          if (convo && convo.title === "New Chat") {
-            const raw = trimmedText.length > 40 ? trimmedText.slice(0, 40) + "…" : trimmedText;
-            const title = raw.replace(/\b\w/g, (c) => c.toUpperCase());
-            const updated = prevConversations.map((c) => c.id === activeConvoId ? { ...c, title } : c);
-            saveConversations(userEmail, updated);
-            return updated;
-          }
-          return prevConversations;
-        });
+      if (!isLoggedIn || !getStoredAccessToken()) {
+        toast.error("Please log in to send messages.");
+        return;
       }
 
-      return updatedMsgs;
-    });
+      const modeAtSend: "citizen" | "professional" = isCitizen ? "citizen" : "professional";
+      const setModeMessages = modeAtSend === "citizen" ? setCitizenMessages : setProfessionalMessages;
+      const setModeLoading = modeAtSend === "citizen" ? setCitizenLoading : setProfessionalLoading;
 
-    setModeLoading(true);
-
-    setTimeout(() => {
-      const sample = SAMPLE_RESPONSES[Math.floor(Math.random() * SAMPLE_RESPONSES.length)];
-      const aiMsg: ChatMessageData = { ...sample, id: (Date.now() + 1).toString() };
+      const userMsg: ChatMessageData = { id: Date.now().toString(), role: "user", content: trimmedText };
 
       setModeMessages((prevMessages) => {
-        const finalMsgs = [...prevMessages, aiMsg];
+        const updatedMsgs = [...prevMessages, userMsg];
+
         if (isLoggedIn && userEmail && activeConvoId && modeAtSend === "citizen") {
-          saveMessages(userEmail, activeConvoId, finalMsgs);
+          saveMessages(userEmail, activeConvoId, updatedMsgs);
+          setConversations((prevConversations) => {
+            const convo = prevConversations.find((c) => c.id === activeConvoId);
+            if (convo && convo.title === "New Chat") {
+              const raw = trimmedText.length > 40 ? trimmedText.slice(0, 40) + "…" : trimmedText;
+              const title = raw.replace(/\b\w/g, (c) => c.toUpperCase());
+              const updated = prevConversations.map((c) =>
+                c.id === activeConvoId ? { ...c, title } : c
+              );
+              saveConversations(userEmail, updated);
+              return updated;
+            }
+            return prevConversations;
+          });
         }
-        return finalMsgs;
+
+        return updatedMsgs;
       });
 
-      setModeLoading(false);
-    }, 2000);
-  }, [isCitizen, isLoggedIn, userEmail, activeConvoId]);
+      setModeLoading(true);
+
+      try {
+        await postChat(trimmedText, modeAtSend);
+      } catch (err) {
+        const e = err as Error & { status?: number };
+        setModeMessages((prev) => {
+          const next = prev.filter((m) => m.id !== userMsg.id);
+          if (isLoggedIn && userEmail && activeConvoId && modeAtSend === "citizen") {
+            saveMessages(userEmail, activeConvoId, next);
+          }
+          return next;
+        });
+        if (e.status === 401) {
+          logout();
+          toast.error("Session expired. Please log in again.");
+        } else {
+          toast.error(e.message || "Could not validate your message. Please try again.");
+        }
+        setModeLoading(false);
+        return;
+      }
+
+      setTimeout(() => {
+        const sample = SAMPLE_RESPONSES[Math.floor(Math.random() * SAMPLE_RESPONSES.length)];
+        const aiMsg: ChatMessageData = { ...sample, id: (Date.now() + 1).toString() };
+
+        setModeMessages((prevMessages) => {
+          const finalMsgs = [...prevMessages, aiMsg];
+          if (isLoggedIn && userEmail && activeConvoId && modeAtSend === "citizen") {
+            saveMessages(userEmail, activeConvoId, finalMsgs);
+          }
+          return finalMsgs;
+        });
+
+        setModeLoading(false);
+      }, 2000);
+    },
+    [isCitizen, isLoggedIn, userEmail, activeConvoId, logout]
+  );
 
   const handleFeedback = useCallback((messageId: string, type: FeedbackType, comment?: string) => {
     setFeedbacks((prev) => {

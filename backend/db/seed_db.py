@@ -1,107 +1,148 @@
-import os
 import json
-from sqlalchemy import create_engine, Column, String, Date, Text, ForeignKey
-from sqlalchemy.orm import declarative_base, sessionmaker, relationship
+import os
+import sys
+import uuid
+from datetime import date, datetime
+from pathlib import Path
+
 from dotenv import load_dotenv
 
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
-env_path = os.path.join(BASE_DIR, ".env")
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
+
+from sqlalchemy.orm import Session  # noqa: E402
+
+from app.db.models import (  # noqa: E402
+    Amendment,
+    Base,
+    Provision,
+    Statute,
+    StructuralDivision,
+)
+from app.db.session import SessionLocal, engine  # noqa: E402
+
+REPO_ROOT = BACKEND_ROOT.parent
+env_path = REPO_ROOT / ".env"
 load_dotenv(env_path)
 
-DATABASE_URL = os.getenv("DATABASE_URL")
 
-if not DATABASE_URL:
-    raise ValueError(f"CRITICAL ERROR: DATABASE_URL is missing or .env file not found at {env_path}")
-
-# Initialize SQLAlchemy
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(bind=engine)
-Base = declarative_base()
-
-# ERD SQLAlchemy Models
-
-class Statute(Base):
-    __tablename__ = 'statutes'
-    statute_id = Column(String(36), primary_key=True)
-    title = Column(String(255), nullable=False)
-    statute_type = Column(String(50))
-    cap_number = Column(String(50))
-    frbr_uri = Column(String(255))
-    latest_version_date = Column(String(50))
-
-class Amendment(Base):
-    __tablename__ = 'amendments'
-    amendment_id = Column(String(36), primary_key=True)
-    statute_id = Column(String(36), ForeignKey('statutes.statute_id'))
-    amending_law_title = Column(String(255))
-    amendment_date = Column(String(50))
-
-class StructuralDivision(Base):
-    __tablename__ = 'structural_divisions'
-    division_id = Column(String(36), primary_key=True)
-    statute_id = Column(String(36), ForeignKey('statutes.statute_id'))
-    parent_division_id = Column(String(36), nullable=True)
-    division_type = Column(String(50))
-    division_number = Column(String(50))
-    heading = Column(Text)
-
-class Provision(Base):
-    __tablename__ = 'provisions'
-    provision_id = Column(String(36), primary_key=True)
-    division_id = Column(String(36), ForeignKey('structural_divisions.division_id'))
-    latent_theme_id = Column(String(36), nullable=True) # For Horris's Topics later
-    provision_type = Column(String(50))
-    provision_number = Column(String(50))
-    heading = Column(Text)
-    akn_eid = Column(String(100))
-    clean_text = Column(Text, nullable=False)
-    status = Column(String(50))
+def _parse_date(val):
+    if val is None or val == "":
+        return None
+    if isinstance(val, date) and not isinstance(val, datetime):
+        return val
+    if isinstance(val, datetime):
+        return val.date()
+    s = str(val).strip()[:10]
+    try:
+        return datetime.strptime(s, "%Y-%m-%d").date()
+    except ValueError:
+        return None
 
 
-# Execution Logic
+def _uuid(val) -> uuid.UUID:
+    if isinstance(val, uuid.UUID):
+        return val
+    return uuid.UUID(str(val))
 
-def seed_database():
-    print("Creating tables in Neon.tech PostgreSQL...")
-    Base.metadata.drop_all(bind=engine) # Resets DB for a clean slate
+
+def _truncate(s: str | None, n: int) -> str | None:
+    if s is None:
+        return None
+    s = str(s)
+    return s if len(s) <= n else s[:n]
+
+
+def _map_statute(row: dict) -> dict:
+    return {
+        "statute_id": _uuid(row["statute_id"]),
+        "title": row["title"],
+        "statute_type": row.get("statute_type"),
+        "cap_number": row.get("cap_number"),
+        "frbr_uri": row.get("frbr_uri"),
+        "latest_version_date": _parse_date(row.get("latest_version_date")),
+    }
+
+
+def _map_amendment(row: dict) -> dict:
+    return {
+        "amendment_id": _uuid(row["amendment_id"]),
+        "statute_id": _uuid(row["statute_id"]),
+        "amending_law_title": row.get("amending_law_title"),
+        "amendment_date": _parse_date(row.get("amendment_date")),
+    }
+
+
+def _map_division(row: dict) -> dict:
+    return {
+        "division_id": _uuid(row["division_id"]),
+        "statute_id": _uuid(row["statute_id"]),
+        "parent_division_id": _uuid(row["parent_division_id"]) if row.get("parent_division_id") else None,
+        "division_type": row.get("division_type"),
+        "division_number": _truncate(row.get("division_number"), 20),
+        "heading": _truncate(row.get("heading"), 255),
+    }
+
+
+def _map_provision(row: dict) -> dict:
+    return {
+        "provision_id": _uuid(row["provision_id"]),
+        "division_id": _uuid(row["division_id"]),
+        "provision_number": _truncate(row.get("provision_number"), 20),
+        "heading": _truncate(row.get("heading"), 255),
+        "akn_eid": row.get("akn_eid"),
+        "clean_text": row["clean_text"],
+        "status": row.get("status"),
+    }
+
+
+def seed_database(*, reset: bool = True) -> None:
+    json_path = REPO_ROOT / "ml_pipeline" / "data" / "processed" / "relational_database_seed.json"
+    if not json_path.is_file():
+        print(f"Seed JSON not found at {json_path}. Creating tables only.")
+        Base.metadata.create_all(bind=engine)
+        return
+
+    print("Applying schema and loading seed data...")
+    if reset:
+        Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
-    
-    session = SessionLocal()
-    json_path = os.path.join(os.path.dirname(__file__), "../../ml_pipeline/data/processed/relational_database_seed.json")
-    
-    print("Loading Golden Dataset...")
-    with open(json_path, 'r', encoding='utf-8') as f:
+
+    session: Session = SessionLocal()
+    with open(json_path, encoding="utf-8") as f:
         data = json.load(f)
 
     try:
-        # Insert Statutes
-        print(f"Inserting {len(data['statutes'])} Statutes...")
-        session.bulk_insert_mappings(Statute, data['statutes'])
-        
-        # Insert Amendments
-        print(f"Inserting {len(data['amendments'])} Amendments...")
-        session.bulk_insert_mappings(Amendment, data['amendments'])
-        
-        # Insert Divisions
-        print(f"Inserting {len(data['structural_divisions'])} Divisions...")
-        session.bulk_insert_mappings(StructuralDivision, data['structural_divisions'])
-        session.commit() # Commit parents before adding children
-        
-        # Insert Provisions (Batching to prevent memory overload on 19k rows)
-        print(f"Inserting {len(data['provisions'])} Provisions in batches...")
+        print(f"Inserting {len(data['statutes'])} statutes...")
+        session.bulk_insert_mappings(Statute, [_map_statute(r) for r in data["statutes"]])
+
+        print(f"Inserting {len(data['amendments'])} amendments...")
+        session.bulk_insert_mappings(Amendment, [_map_amendment(r) for r in data["amendments"]])
+
+        print(f"Inserting {len(data['structural_divisions'])} structural divisions...")
+        session.bulk_insert_mappings(
+            StructuralDivision, [_map_division(r) for r in data["structural_divisions"]]
+        )
+        session.commit()
+
+        print(f"Inserting {len(data['provisions'])} provisions in batches...")
         batch_size = 2000
-        for i in range(0, len(data['provisions']), batch_size):
-            batch = data['provisions'][i:i+batch_size]
+        prov_rows = [_map_provision(r) for r in data["provisions"]]
+        for i in range(0, len(prov_rows), batch_size):
+            batch = prov_rows[i : i + batch_size]
             session.bulk_insert_mappings(Provision, batch)
             session.commit()
-            print(f"  -> Inserted {i + len(batch)} / {len(data['provisions'])}")
+            print(f"  -> Inserted {i + len(batch)} / {len(prov_rows)}")
 
-        print("Database Seeding Complete! PostgreSQL is fully populated.")
-    
+        print("Database seeding complete.")
     except Exception as e:
         session.rollback()
         print(f"Error seeding database: {e}")
+        raise
     finally:
         session.close()
 
+
 if __name__ == "__main__":
-    seed_database()
+    seed_database(reset=True)
