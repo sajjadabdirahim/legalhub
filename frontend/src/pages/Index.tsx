@@ -1,0 +1,294 @@
+import { useState, useCallback, useEffect } from "react";
+import { ModeProvider, useMode } from "@/contexts/ModeContext";
+import { useAuth } from "@/contexts/AuthContext";
+import { AppHeader } from "@/components/AppHeader";
+import { ChatHistorySidebar, Conversation } from "@/components/ChatHistorySidebar";
+import { AIWarningBanner } from "@/components/AIWarningBanner";
+import { LoginReminder } from "@/components/LoginReminder";
+import { ChatMessage, ChatMessageData, MessageFeedback, FeedbackType } from "@/components/ChatMessage";
+import { ChatInputIsland } from "@/components/ChatInputIsland";
+import { LegalResourcesPanel } from "@/components/LegalResourcesPanel";
+import { MobileBottomSheet } from "@/components/MobileBottomSheet";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { cn } from "@/lib/utils";
+
+const SIDEBAR_WIDTH = "18rem";
+
+const WELCOME_MESSAGE: ChatMessageData = {
+  id: "welcome",
+  role: "ai",
+  content:
+    "Welcome to LegalHub! I can help you understand Kenyan laws in simple terms. Ask me about traffic rules, employment rights, land ownership, or any legal topic. What would you like to know?",
+};
+
+const SAMPLE_RESPONSES: ChatMessageData[] = [
+  {
+    id: "",
+    role: "ai",
+    content:
+      "If you're caught driving without a valid license in Kenya, you could face a fine of up to KES 100,000 or imprisonment for up to one year, or both. The law requires every driver to carry their license while driving.",
+    originalLegalText:
+      'Section 30(1) of the Traffic Act, Cap. 403: "Any person who drives a motor vehicle on a road without being the holder of a valid driving licence issued to him under this Act authorizing him to drive a motor vehicle of that class or description shall be guilty of an offence and shall be liable to a fine not exceeding one hundred thousand shillings or to imprisonment for a term not exceeding twelve months or to both."',
+    citation: "Traffic Act, Cap. 403, Sec. 30(1)",
+  },
+  {
+    id: "",
+    role: "ai",
+    content:
+      "Under Kenyan employment law, an employer must give you written notice before termination. The notice period depends on how often you're paid — at least 28 days for monthly employees. You're also entitled to severance pay if you've been employed for over 12 months.",
+    originalLegalText:
+      'Section 35(1) of the Employment Act, 2007: "Either party to a contract of service may terminate the contract by giving notice in writing to the other party. The notice period shall not be less than twenty-eight days where the employee is engaged on monthly terms."',
+    citation: "Employment Act, 2007, Sec. 35(1)",
+  },
+];
+
+function loadConversations(email: string): Conversation[] {
+  try {
+    const data = localStorage.getItem(`legalhub_convos_${email}`);
+    return data ? JSON.parse(data) : [];
+  } catch { return []; }
+}
+function saveConversations(email: string, convos: Conversation[]) {
+  localStorage.setItem(`legalhub_convos_${email}`, JSON.stringify(convos));
+}
+function loadMessages(email: string, convoId: string): ChatMessageData[] {
+  try {
+    const data = localStorage.getItem(`legalhub_msgs_${email}_${convoId}`);
+    return data ? JSON.parse(data) : [WELCOME_MESSAGE];
+  } catch { return [WELCOME_MESSAGE]; }
+}
+function saveMessages(email: string, convoId: string, msgs: ChatMessageData[]) {
+  localStorage.setItem(`legalhub_msgs_${email}_${convoId}`, JSON.stringify(msgs));
+}
+
+function AppContent() {
+  const { isProfessional, isCitizen } = useMode();
+  const { isLoggedIn, userEmail } = useAuth();
+  const isMobile = useIsMobile();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [activeConvoId, setActiveConvoId] = useState<string | null>(null);
+
+  // Independent message & loading states per mode
+  const [citizenMessages, setCitizenMessages] = useState<ChatMessageData[]>([WELCOME_MESSAGE]);
+  const [professionalMessages, setProfessionalMessages] = useState<ChatMessageData[]>([WELCOME_MESSAGE]);
+  const [citizenLoading, setCitizenLoading] = useState(false);
+  const [professionalLoading, setProfessionalLoading] = useState(false);
+  const [feedbacks, setFeedbacks] = useState<Record<string, MessageFeedback>>({});
+
+  // Derived: current mode's state
+  const messages = isCitizen ? citizenMessages : professionalMessages;
+  const isLoading = isCitizen ? citizenLoading : professionalLoading;
+
+  useEffect(() => {
+    if (isLoggedIn && userEmail) {
+      const convos = loadConversations(userEmail);
+      setConversations(convos);
+      if (convos.length > 0) {
+        setActiveConvoId(convos[0].id);
+        setCitizenMessages(loadMessages(userEmail, convos[0].id));
+      } else {
+        createNewConversation(userEmail);
+      }
+    } else {
+      setConversations([]);
+      setActiveConvoId(null);
+      setCitizenMessages([WELCOME_MESSAGE]);
+      setProfessionalMessages([WELCOME_MESSAGE]);
+      setSidebarOpen(false);
+    }
+  }, [isLoggedIn, userEmail]);
+
+  const createNewConversation = useCallback((email?: string) => {
+    const e = email || userEmail;
+    if (!e) return;
+    const newId = Date.now().toString();
+    const newConvo: Conversation = { id: newId, title: "New Chat", createdAt: Date.now() };
+    setConversations((prev) => {
+      const updated = [newConvo, ...prev];
+      saveConversations(e, updated);
+      return updated;
+    });
+    setActiveConvoId(newId);
+    const initialMsgs = [WELCOME_MESSAGE];
+    setCitizenMessages(initialMsgs);
+    saveMessages(e, newId, initialMsgs);
+  }, [userEmail]);
+
+  const selectConversation = useCallback((id: string) => {
+    if (!userEmail) return;
+    setActiveConvoId(id);
+    setCitizenMessages(loadMessages(userEmail, id));
+  }, [userEmail]);
+
+  const deleteConversation = useCallback((id: string) => {
+    if (!userEmail) return;
+    setConversations((prev) => {
+      const updated = prev.filter((c) => c.id !== id);
+      saveConversations(userEmail, updated);
+      localStorage.removeItem(`legalhub_msgs_${userEmail}_${id}`);
+      if (activeConvoId === id) {
+        if (updated.length > 0) {
+          setActiveConvoId(updated[0].id);
+          setCitizenMessages(loadMessages(userEmail, updated[0].id));
+        } else {
+          createNewConversation();
+        }
+      }
+      return updated;
+    });
+  }, [userEmail, activeConvoId, createNewConversation]);
+
+  const handleSend = useCallback((text: string) => {
+    const trimmedText = text.trim();
+    if (!trimmedText) return;
+
+    const modeAtSend: "citizen" | "professional" = isCitizen ? "citizen" : "professional";
+    const setModeMessages = modeAtSend === "citizen" ? setCitizenMessages : setProfessionalMessages;
+    const setModeLoading = modeAtSend === "citizen" ? setCitizenLoading : setProfessionalLoading;
+
+    const userMsg: ChatMessageData = { id: Date.now().toString(), role: "user", content: trimmedText };
+
+    setModeMessages((prevMessages) => {
+      const updatedMsgs = [...prevMessages, userMsg];
+
+      if (isLoggedIn && userEmail && activeConvoId && modeAtSend === "citizen") {
+        saveMessages(userEmail, activeConvoId, updatedMsgs);
+        setConversations((prevConversations) => {
+          const convo = prevConversations.find((c) => c.id === activeConvoId);
+          if (convo && convo.title === "New Chat") {
+            const raw = trimmedText.length > 40 ? trimmedText.slice(0, 40) + "…" : trimmedText;
+            const title = raw.replace(/\b\w/g, (c) => c.toUpperCase());
+            const updated = prevConversations.map((c) => c.id === activeConvoId ? { ...c, title } : c);
+            saveConversations(userEmail, updated);
+            return updated;
+          }
+          return prevConversations;
+        });
+      }
+
+      return updatedMsgs;
+    });
+
+    setModeLoading(true);
+
+    setTimeout(() => {
+      const sample = SAMPLE_RESPONSES[Math.floor(Math.random() * SAMPLE_RESPONSES.length)];
+      const aiMsg: ChatMessageData = { ...sample, id: (Date.now() + 1).toString() };
+
+      setModeMessages((prevMessages) => {
+        const finalMsgs = [...prevMessages, aiMsg];
+        if (isLoggedIn && userEmail && activeConvoId && modeAtSend === "citizen") {
+          saveMessages(userEmail, activeConvoId, finalMsgs);
+        }
+        return finalMsgs;
+      });
+
+      setModeLoading(false);
+    }, 2000);
+  }, [isCitizen, isLoggedIn, userEmail, activeConvoId]);
+
+  const handleFeedback = useCallback((messageId: string, type: FeedbackType, comment?: string) => {
+    setFeedbacks((prev) => {
+      if (type === null) {
+        const next = { ...prev };
+        delete next[messageId];
+        return next;
+      }
+      return {
+        ...prev,
+        [messageId]: { messageId, type, comment, timestamp: Date.now() },
+      };
+    });
+  }, []);
+
+  const showPushSidebar = isLoggedIn && sidebarOpen && !isMobile;
+
+  // Get latest AI message with citation for the professional side panel
+  const latestAiMessage = [...professionalMessages].reverse().find(
+    (m) => m.role === "ai" && (m.citation || m.originalLegalText)
+  ) || null;
+
+  return (
+    <div className="min-h-screen flex flex-col transition-crossfade font-sans">
+      <AppHeader onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
+
+      {isLoggedIn && (
+        <ChatHistorySidebar
+          isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+          conversations={conversations}
+          activeConversationId={activeConvoId}
+          onSelectConversation={selectConversation}
+          onNewConversation={() => createNewConversation()}
+          onDeleteConversation={deleteConversation}
+        />
+      )}
+
+      <div
+        className="flex flex-1 overflow-hidden transition-spring"
+        style={{ marginLeft: showPushSidebar ? SIDEBAR_WIDTH : "0" }}
+      >
+        <main
+          className={cn(
+            "flex-1 flex flex-col min-w-0 transition-spring",
+            isProfessional ? "lg:w-[60%]" : "w-full"
+          )}
+          role="main"
+          aria-label="Legal research conversation"
+        >
+          <AIWarningBanner />
+          {!isLoggedIn && <LoginReminder />}
+
+          <div className="flex-1 overflow-y-auto px-4 py-6">
+            <div className="max-w-3xl mx-auto space-y-5">
+              {messages.map((msg) => (
+                <ChatMessage
+                  key={msg.id}
+                  message={msg}
+                  feedback={feedbacks[msg.id] || null}
+                  onFeedback={handleFeedback}
+                />
+              ))}
+              {isLoading && (
+                <div className="flex justify-start animate-fade-in">
+                  <div className="rounded-2xl border border-border bg-card shadow-card px-5 py-4 flex items-center gap-3">
+                    <div className="flex gap-1.5">
+                      <span className="h-2 w-2 rounded-full bg-accent animate-pulse-subtle" style={{ animationDelay: "0ms" }} />
+                      <span className="h-2 w-2 rounded-full bg-accent animate-pulse-subtle" style={{ animationDelay: "200ms" }} />
+                      <span className="h-2 w-2 rounded-full bg-accent animate-pulse-subtle" style={{ animationDelay: "400ms" }} />
+                    </div>
+                    <span className="text-xs text-muted-foreground animate-pulse-subtle">
+                      Retrieving exact statutes…
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <ChatInputIsland onSend={handleSend} isLoading={isLoading} />
+        </main>
+
+        {isProfessional && (
+          <aside
+            className="hidden lg:flex lg:w-[40%] border-l border-border bg-card flex-col transition-spring"
+            aria-label="Legal resources panel"
+          >
+            <LegalResourcesPanel onTopicClick={handleSend} latestAiMessage={latestAiMessage} feedbacks={feedbacks} />
+          </aside>
+        )}
+      </div>
+
+      <MobileBottomSheet onTopicClick={handleSend} latestAiMessage={latestAiMessage} feedbacks={feedbacks} />
+    </div>
+  );
+}
+
+export default function Index() {
+  return (
+    <ModeProvider>
+      <AppContent />
+    </ModeProvider>
+  );
+}
