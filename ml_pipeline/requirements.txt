@@ -1,0 +1,27 @@
+# ==========================================
+# LegalHub ML Pipeline Dependencies
+# ==========================================
+
+# Data Ingestion & Parsing (Sajjad)
+requests>=2.31.0
+beautifulsoup4>=4.12.3
+lxml>=5.1.0                # Required by BeautifulSoup for Akoma Ntoso XML parsing
+python-dotenv>=1.0.1       # For loading .env credentials safely
+boto3>=1.34.0
+
+sqlalchemy>=2.0.32
+psycopg2-binary>2.9.1
+
+# 2. NLP Engine & Deep Learning (Sajjad)
+# torch>=2.2.0               # PyTorch framework for tensor computation 
+# transformers>=4.38.0       # Hugging Face API for Legal-BERT and BERT2BERT 
+# google-generativeai>=0.4.0 # For offline weak supervision via Gemini 1.5 Pro API 
+
+# 3. Topic Modeling Engine (Horris)
+# bertopic>=0.16.0           # Core topic modeling library [cite: 31]
+# umap-learn>=0.5.5          # Dimensionality reduction (768-d to 5-d) [cite: 152]
+# hdbscan>=0.8.33            # Spatial density-based clustering [cite: 153]
+
+# 4. Internal API Wrapper (Microservice Orchestration)
+# fastapi>=0.110.0           # For exposing the /internal/ml/trigger endpoints [cite: 298]
+# uvicorn>=0.27.0            # ASGI server to run the internal ML FastAPI app

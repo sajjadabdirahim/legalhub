@@ -1,73 +1,123 @@
-# Welcome to your Lovable project
+# LegalHub Frontend
 
-## Project info
+## Overview
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+The frontend is responsible for handling user interactions, rendering AI responses, managing state, and communicating with backend services (APIs, NLP engines, and knowledge graph systems).
 
-## How can I edit this code?
+---
 
-There are several ways of editing your application.
 
-**Use Lovable**
+## Core Responsibilities of the Frontend
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+The LegalHub frontend handles the following:
 
-Changes made via Lovable will be committed automatically to this repo.
+### 1. User Interface (UI)
+- Display conversational chat interface
+- Render legal responses and citations clearly
+- Provide structured views for legal topics and results
 
-**Use your preferred IDE**
+### 2. User Experience (UX)
+- Ensure intuitive navigation
+- Provide fast and responsive interactions
+- Maintain accessibility standards
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+### 3. API Communication
+- Send user queries to backend services
+- Receive and render AI-generated responses
+- Handle errors and loading states
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+### 4. State Management
+- Manage chat history and session context
+- Handle UI states (loading, error, success)
 
-Follow these steps:
+### 5. Feedback System (RLHF)
+- Allow users to rate responses
+- Capture feedback for backend learning systems
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+### 6. Data Visualization (Optional/Advanced)
+- Display topic models or legal clusters
+- Present structured legal insights
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+---
 
-# Step 3: Install the necessary dependencies.
-npm i
+## Technology Stack
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+The frontend is built using modern web technologies:
+
+- **Vite** — Fast build tool and development server  
+- **TypeScript** — Strong typing for scalability and maintainability  
+- **React** — Component-based UI development  
+- **shadcn/ui** — Prebuilt accessible UI components  
+- **Tailwind CSS** — Utility-first styling framework  
+
+---
+
+## Setup & Installation
+
+### Prerequisites
+
+- Node.js (v16+ recommended)  
+- npm or yarn  
+
+---
+
+### Installation Steps
+
+1. Clone the repository:
+   ```sh
+   git clone <YOUR_GIT_URL>
+
+Navigate to the project:
+
+cd legalhub-frontend
+
+Install dependencies:
+
+npm install
+
+Start development server:
+
 npm run dev
-```
 
-**Edit a file directly in GitHub**
+Application runs at:
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+http://localhost:5173
+Environment Configuration
 
-**Use GitHub Codespaces**
+Create a .env file in the root directory:
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+VITE_API_BASE_URL=http://localhost:8000
 
-## What technologies are used for this project?
+This connects the frontend to backend services.
 
-This project is built with:
+Build for Production
+npm run build
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+Output will be in the dist/ folder.
 
-## How can I deploy this project?
+Deployment
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+The frontend can be deployed on:
 
-## Can I connect a custom domain to my Lovable project?
+Vercel
+Netlify
+GitHub Pages
+Any static hosting server
+Future Enhancements
+Real-time streaming responses (LLM output streaming)
+Advanced legal dashboards
+Knowledge graph visualization
+Multi-language support (English & Kiswahili)
+Authentication and user roles
+Contribution Guidelines
+Fork the repository
 
-Yes, you can!
+Create a feature branch
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+git checkout -b feature/your-feature
+Commit changes
+Push to your branch
+Create a Pull Request
+License
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+This project is intended for academic and research purposes within the LegalHub system. Licensing may evolve over time.
