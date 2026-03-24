@@ -49,7 +49,7 @@ class Provision(Base):
     __tablename__ = 'provisions'
     provision_id = Column(String(36), primary_key=True)
     division_id = Column(String(36), ForeignKey('structural_divisions.division_id'))
-    latent_theme_id = Column(String(36), nullable=True) # For Horris's Topics later
+    #latent_topic_id = Column(String(36), nullable=True) 
     provision_type = Column(String(50))
     provision_number = Column(String(50))
     heading = Column(Text)
