@@ -1,5 +1,9 @@
 import uuid
 from typing import Any
+from datetime import datetime, timedelta, timezone
+import hashlib
+import secrets
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel, EmailStr, Field
@@ -8,9 +12,10 @@ from sqlalchemy.orm import Session
 
 from app.auth_password import hash_password, verify_password
 from app.config import settings
-from app.db.models import User
+from app.db.models import PasswordResetToken, User
 from app.db.session import get_db
 from app.google_verify import verify_google_credential
+from app.mailer import send_password_reset_email
 from app.security import create_access_token
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -38,14 +43,25 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     email: str
     user_id: str
+    is_new_user: bool = False
 
 
-def _issue_token(user: User) -> TokenResponse:
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=20)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+def _issue_token(user: User, *, is_new_user: bool = False) -> TokenResponse:
     token = create_access_token(subject=str(user.user_id))
     return TokenResponse(
         access_token=token,
         email=user.email,
         user_id=str(user.user_id),
+        is_new_user=is_new_user,
     )
 
 
@@ -91,12 +107,23 @@ def login_google(
     db: Session = Depends(get_db),
 ) -> TokenResponse:
     email: str | None = None
+    is_new_user = False
 
     if body and body.credential and settings.google_client_id:
         try:
             claims: dict[str, Any] = verify_google_credential(body.credential)
-        except (ValueError, RuntimeError) as e:
-            raise HTTPException(status_code=401, detail="Invalid Google credential.") from e
+        except ValueError as e:
+            msg = str(e) or "Invalid Google credential."
+            raise HTTPException(
+                status_code=401,
+                detail=(
+                    "Invalid Google credential. "
+                    f"Verifier reason: {msg}. "
+                    "Usually this means audience/client-id mismatch, expired token, or wrong issuer."
+                ),
+            ) from e
+        except RuntimeError as e:
+            raise HTTPException(status_code=503, detail=str(e)) from e
         raw = claims.get("email")
         if not raw or not isinstance(raw, str):
             raise HTTPException(status_code=400, detail="Google token did not include an email.")
@@ -128,6 +155,7 @@ def login_google(
         db.add(user)
         try:
             db.commit()
+            is_new_user = True
         except IntegrityError:
             db.rollback()
             user = db.query(User).filter(User.email == email).first()
@@ -136,4 +164,70 @@ def login_google(
         else:
             db.refresh(user)
 
-    return _issue_token(user)
+    return _issue_token(user, is_new_user=is_new_user)
+
+
+@router.post("/forgot-password")
+def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get_db)) -> dict[str, str | None]:
+    """
+    Always return a generic success message to avoid account enumeration.
+    """
+    generic = {"message": "If an account exists for that email, a reset link has been sent."}
+    user = db.query(User).filter(User.email == str(body.email).lower()).first()
+    if user is None:
+        return generic
+
+    raw_token = secrets.token_urlsafe(48)
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=30)
+
+    row = PasswordResetToken(
+        token_id=uuid.uuid4(),
+        user_id=user.user_id,
+        token_hash=token_hash,
+        expires_at=expires_at,
+    )
+    db.add(row)
+    db.commit()
+
+    query = urlencode({"reset_token": raw_token})
+    reset_url = f"{settings.frontend_base_url.rstrip('/')}/login?{query}"
+    try:
+        send_password_reset_email(user.email, reset_url)
+        return generic
+    except RuntimeError:
+        # Development fallback: no SMTP configured, return reset link in response so flow is testable.
+        # In production, configure SMTP to deliver email and avoid exposing reset links in API responses.
+        return {
+            "message": (
+                "SMTP is not configured, so email was not sent. "
+                "Use the reset_link below to continue in development."
+            ),
+            "reset_link": reset_url,
+        }
+
+
+@router.post("/reset-password")
+def reset_password(body: ResetPasswordRequest, db: Session = Depends(get_db)) -> dict[str, str]:
+    token_hash = hashlib.sha256(body.token.encode("utf-8")).hexdigest()
+    now = datetime.now(timezone.utc)
+
+    row = (
+        db.query(PasswordResetToken)
+        .filter(PasswordResetToken.token_hash == token_hash)
+        .filter(PasswordResetToken.used_at.is_(None))
+        .filter(PasswordResetToken.expires_at > now)
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=400, detail="Reset link is invalid or expired.")
+
+    user = db.query(User).filter(User.user_id == row.user_id).first()
+    if user is None:
+        raise HTTPException(status_code=400, detail="User account was not found.")
+
+    user.password_hash = hash_password(body.new_password)
+    row.used_at = now
+    db.commit()
+
+    return {"message": "Password updated successfully. You can now log in with your new password."}

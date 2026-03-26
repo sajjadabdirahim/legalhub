@@ -1,20 +1,36 @@
 import { useState, useRef, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Scale, Mail, Lock, ArrowRight, Loader2, KeyRound } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { requestPasswordReset, resetPasswordWithToken } from "@/lib/authApi";
 
 export function LoginPage() {
   const { login, signup, loginWithGoogle } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const googleBtnRef = useRef<HTMLDivElement>(null);
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
   const [isSignup, setIsSignup] = useState(false);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
+  const [resetToken, setResetToken] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [devResetLink, setDevResetLink] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const isResetMode = resetToken.trim().length > 0;
+
+  useEffect(() => {
+    const token = searchParams.get("reset_token");
+    if (token) {
+      setResetToken(token);
+      setIsForgotPassword(true);
+      setIsSignup(false);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (!googleClientId || isForgotPassword) return;
@@ -56,6 +72,35 @@ export function LoginPage() {
     e.preventDefault();
     setError("");
     setSuccess("");
+    setDevResetLink(null);
+
+    if (isResetMode) {
+      if (!newPassword || !confirmPassword) {
+        setError("Please fill in all password fields.");
+        return;
+      }
+      if (newPassword.length < 8) {
+        setError("New password must be at least 8 characters.");
+        return;
+      }
+      if (newPassword !== confirmPassword) {
+        setError("Passwords do not match.");
+        return;
+      }
+      setLoading(true);
+      const result = await resetPasswordWithToken(resetToken, newPassword);
+      setLoading(false);
+      if (!result.ok) {
+        setError(result.message);
+        return;
+      }
+      setSuccess(result.message);
+      setResetToken("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setSearchParams({});
+      return;
+    }
 
     if (isForgotPassword) {
       if (!email) {
@@ -63,11 +108,14 @@ export function LoginPage() {
         return;
       }
       setLoading(true);
-      // Mock password reset
-      setTimeout(() => {
-        setLoading(false);
-        setSuccess("If an account exists for that email, a reset link has been sent.");
-      }, 1000);
+      const result = await requestPasswordReset(email);
+      setLoading(false);
+      if (!result.ok) {
+        setError(result.message);
+        return;
+      }
+      setSuccess(result.message);
+      setDevResetLink(result.resetLink || null);
       return;
     }
 
@@ -101,13 +149,17 @@ export function LoginPage() {
     navigate("/");
   };
 
-  const heading = isForgotPassword
+  const heading = isResetMode
+    ? "Set a new password"
+    : isForgotPassword
     ? "Reset your password"
     : isSignup
     ? "Create your account"
     : "Welcome back";
 
-  const subtext = isForgotPassword
+  const subtext = isResetMode
+    ? "Enter your new password to complete account recovery"
+    : isForgotPassword
     ? "Enter your email and we'll send you a reset link"
     : isSignup
     ? "Sign up to save your research history"
@@ -135,28 +187,29 @@ export function LoginPage() {
           <p className="text-xs text-muted-foreground mb-5">{subtext}</p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Email */}
-            <div>
-              <label htmlFor="email" className="block text-xs font-medium text-foreground mb-1.5">
-                Email
-              </label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                <input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  className="w-full h-10 pl-9 pr-3 rounded-xl border border-input bg-background text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
-                  autoComplete="email"
-                  required
-                />
+            {!isResetMode && (
+              <div>
+                <label htmlFor="email" className="block text-xs font-medium text-foreground mb-1.5">
+                  Email
+                </label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                  <input
+                    id="email"
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    className="w-full h-10 pl-9 pr-3 rounded-xl border border-input bg-background text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
+                    autoComplete="email"
+                    required
+                  />
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Password (hidden for forgot password) */}
-            {!isForgotPassword && (
+            {!isForgotPassword && !isResetMode && (
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label htmlFor="password" className="block text-xs font-medium text-foreground">
@@ -189,11 +242,63 @@ export function LoginPage() {
               </div>
             )}
 
+            {isResetMode && (
+              <>
+                <div>
+                  <label htmlFor="new-password" className="block text-xs font-medium text-foreground mb-1.5">
+                    New password
+                  </label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                    <input
+                      id="new-password"
+                      type="password"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="At least 8 characters"
+                      className="w-full h-10 pl-9 pr-3 rounded-xl border border-input bg-background text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
+                      autoComplete="new-password"
+                      required
+                      minLength={8}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label htmlFor="confirm-password" className="block text-xs font-medium text-foreground mb-1.5">
+                    Confirm new password
+                  </label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                    <input
+                      id="confirm-password"
+                      type="password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      placeholder="Re-enter new password"
+                      className="w-full h-10 pl-9 pr-3 rounded-xl border border-input bg-background text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
+                      autoComplete="new-password"
+                      required
+                      minLength={8}
+                    />
+                  </div>
+                </div>
+              </>
+            )}
+
             {error && (
               <p className="text-xs text-destructive font-medium" role="alert">{error}</p>
             )}
             {success && (
               <p className="text-xs text-accent font-medium" role="status">{success}</p>
+            )}
+            {devResetLink && (
+              <a
+                href={devResetLink}
+                className="block text-xs text-accent underline break-all"
+                aria-label="Open password reset link"
+              >
+                Open reset link: {devResetLink}
+              </a>
             )}
 
             <button
@@ -203,6 +308,11 @@ export function LoginPage() {
             >
               {loading ? (
                 <Loader2 className="h-4 w-4 animate-spin-slow" />
+              ) : isResetMode ? (
+                <>
+                  <KeyRound className="h-4 w-4" />
+                  Update Password
+                </>
               ) : isForgotPassword ? (
                 <>
                   <KeyRound className="h-4 w-4" />
@@ -218,7 +328,7 @@ export function LoginPage() {
           </form>
 
           {/* Divider + Google — only on login/signup */}
-          {!isForgotPassword && (
+          {!isForgotPassword && !isResetMode && (
             <>
               <div className="flex items-center gap-3 my-4">
                 <div className="flex-1 h-px bg-border" />
@@ -258,7 +368,15 @@ export function LoginPage() {
           <div className="mt-5 text-center">
             {isForgotPassword ? (
               <button
-                onClick={() => { setIsForgotPassword(false); setError(""); setSuccess(""); }}
+                onClick={() => {
+                  setIsForgotPassword(false);
+                  setResetToken("");
+                  setNewPassword("");
+                  setConfirmPassword("");
+                  setSearchParams({});
+                  setError("");
+                  setSuccess("");
+                }}
                 className="text-xs text-accent hover:underline font-medium"
               >
                 ← Back to login

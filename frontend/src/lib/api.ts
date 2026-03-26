@@ -27,7 +27,8 @@ export function setStoredAccessToken(token: string | null): void {
 export type ChatMode = "citizen" | "professional";
 
 export async function postChat(query: string, mode: ChatMode): Promise<{
-  sanitized_query: string;
+  user_input: string;
+  sanitized_input: string;
   user_id: string;
   mode: ChatMode;
 }> {
@@ -45,7 +46,8 @@ export async function postChat(query: string, mode: ChatMode): Promise<{
   });
   const data = (await res.json().catch(() => ({}))) as {
     detail?: string | { msg: string }[];
-    sanitized_query?: string;
+    user_input?: string;
+    sanitized_input?: string;
     user_id?: string;
     mode?: ChatMode;
   };
@@ -60,14 +62,16 @@ export async function postChat(query: string, mode: ChatMode): Promise<{
     throw err;
   }
   if (
-    typeof data.sanitized_query !== "string" ||
+    typeof data.user_input !== "string" ||
+    typeof data.sanitized_input !== "string" ||
     typeof data.user_id !== "string" ||
     (data.mode !== "citizen" && data.mode !== "professional")
   ) {
     throw new Error("Invalid response from server.");
   }
   return {
-    sanitized_query: data.sanitized_query,
+    user_input: data.user_input,
+    sanitized_input: data.sanitized_input,
     user_id: data.user_id,
     mode: data.mode,
   };

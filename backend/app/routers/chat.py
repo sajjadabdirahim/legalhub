@@ -15,7 +15,8 @@ class ChatRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
-    sanitized_query: str
+    user_input: str
+    sanitized_input: str
     user_id: str
     mode: Literal["citizen", "professional"]
 
@@ -33,7 +34,8 @@ def chat(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result.error)
     assert result.sanitized is not None
     return ChatResponse(
-        sanitized_query=result.sanitized,
+        user_input=body.query,
+        sanitized_input=result.sanitized,
         user_id=user_id,
         mode=body.mode,
     )

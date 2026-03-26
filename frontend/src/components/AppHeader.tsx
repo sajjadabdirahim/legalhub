@@ -2,6 +2,18 @@ import { ModeToggle } from "./ModeToggle";
 import { Menu, LogIn, LogOut } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Link } from "react-router-dom";
+import { useState } from "react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 interface AppHeaderProps {
   onToggleSidebar: () => void;
@@ -9,6 +21,7 @@ interface AppHeaderProps {
 
 export function AppHeader({ onToggleSidebar }: AppHeaderProps) {
   const { isLoggedIn, userEmail, logout } = useAuth();
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   return (
     <header
@@ -47,13 +60,35 @@ export function AppHeader({ onToggleSidebar }: AppHeaderProps) {
               <span className="hidden md:inline text-xs text-muted-foreground truncate max-w-[120px]">
                 {userEmail}
               </span>
-              <button
-                onClick={logout}
-                className="p-2 rounded-lg hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
-                aria-label="Log out"
-              >
-                <LogOut className="h-4 w-4" />
-              </button>
+              <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+                <AlertDialogTrigger asChild>
+                  <button
+                    className="p-2 rounded-lg hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
+                    aria-label="Log out"
+                  >
+                    <LogOut className="h-4 w-4" />
+                  </button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Log out of LegalHub?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      You will need to sign in again to access saved conversations and professional mode.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={() => {
+                        logout();
+                        setConfirmOpen(false);
+                      }}
+                    >
+                      Log out
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
           ) : (
             <Link

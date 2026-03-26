@@ -2,6 +2,17 @@ import { useState } from "react";
 import { Plus, MessageSquare, X, LogOut, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 export interface Conversation {
   id: string;
@@ -30,6 +41,7 @@ export function ChatHistorySidebar({
 }: ChatHistorySidebarProps) {
   const { logout, userEmail } = useAuth();
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   return (
     <>
@@ -78,7 +90,7 @@ export function ChatHistorySidebar({
                   onMouseLeave={() => setHoveredId(null)}
                 >
                   <button
-                    onClick={() => { onSelectConversation(conv.id); }}
+                    onClick={() => { onSelectConversation(conv.id); onClose(); }}
                     className={cn(
                       "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm text-left transition-colors",
                       activeConversationId === conv.id
@@ -108,16 +120,38 @@ export function ChatHistorySidebar({
         {/* User footer */}
         <div className="border-t border-border p-3">
           <div className="flex items-center justify-between">
-            <span className="text-xs text-muted-foreground truncate max-w-[180px]">
+            <span className="text-xs text-foreground/80 truncate max-w-[180px]">
               {userEmail}
             </span>
-            <button
-              onClick={logout}
-              className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
-              aria-label="Log out"
-            >
-              <LogOut className="h-4 w-4" />
-            </button>
+            <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+              <AlertDialogTrigger asChild>
+                <button
+                  className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
+                  aria-label="Log out"
+                >
+                  <LogOut className="h-4 w-4" />
+                </button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Log out of LegalHub?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    You can sign in again anytime to restore your chat history.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => {
+                      logout();
+                      setConfirmOpen(false);
+                    }}
+                  >
+                    Log out
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
         </div>
       </aside>

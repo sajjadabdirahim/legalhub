@@ -63,6 +63,52 @@ function saveMessages(email: string, convoId: string, msgs: ChatMessageData[]) {
   localStorage.setItem(`legalhub_msgs_${email}_${convoId}`, JSON.stringify(msgs));
 }
 
+function titleCasePhrase(input: string): string {
+  return input
+    .toLowerCase()
+    .split(" ")
+    .filter(Boolean)
+    .map((w) => {
+      if (["of", "the", "and", "for", "to", "in", "on"].includes(w)) return w;
+      return w.charAt(0).toUpperCase() + w.slice(1);
+    })
+    .join(" ")
+    .replace(/^./, (c) => c.toUpperCase());
+}
+
+function formatConversationTitleFromPrompt(prompt: string): string {
+  const cleaned = prompt.replace(/\s+/g, " ").trim();
+  if (!cleaned) return "New Chat";
+
+  // 1) Prefer explicit legal instrument names: "Data Protection Act", "Employment Act", etc.
+  const actMatch = cleaned.match(
+    /\b([A-Za-z][A-Za-z\s&'-]{2,80}?)\s+Act(?:\s*,?\s*\d{4})?\b/i
+  );
+  if (actMatch?.[0]) {
+    return titleCasePhrase(actMatch[0].replace(/\s*,\s*/g, ", ").trim());
+  }
+
+  // 2) Topic mapping fallback when Act name is not explicitly present.
+  const lower = cleaned.toLowerCase();
+  const topicMap: Array<[RegExp, string]> = [
+    [/\bdata\s+protection|privacy|personal\s+data\b/i, "Data Protection Act"],
+    [/\bemployment|termination|dismissal|redundancy|salary|wages|leave\b/i, "Employment Act"],
+    [/\btraffic|driving|licen[cs]e|speeding|road\b/i, "Traffic Act"],
+    [/\bland|title\s+deed|property|lease|tenant|rent\b/i, "Land Law"],
+    [/\bconstitution|constitutional|bill\s+of\s+rights\b/i, "Constitution of Kenya"],
+    [/\bcompany|corporate|director|shareholder|business\s+registration\b/i, "Companies Act"],
+  ];
+  for (const [pattern, title] of topicMap) {
+    if (pattern.test(lower)) return title;
+  }
+
+  // 3) Last resort: concise neutral summary.
+  const words = cleaned.split(" ").filter(Boolean);
+  const summary = words.slice(0, 5).join(" ");
+  const sentenceCase = summary.charAt(0).toUpperCase() + summary.slice(1).toLowerCase();
+  return words.length > 5 ? `${sentenceCase}...` : sentenceCase;
+}
+
 function AppContent() {
   const { isProfessional, isCitizen } = useMode();
   const { isLoggedIn, userEmail, logout } = useAuth();
@@ -82,16 +128,40 @@ function AppContent() {
   const messages = isCitizen ? citizenMessages : professionalMessages;
   const isLoading = isCitizen ? citizenLoading : professionalLoading;
 
+  const createNewConversation = useCallback((email?: string, existingConvos?: Conversation[]) => {
+    const e = email || userEmail;
+    if (!e) return;
+    let activeId = "";
+    setConversations((prev) => {
+      const seed = existingConvos ?? prev;
+      const existingNew = seed.find((c) => c.title === "New Chat");
+      if (existingNew) {
+        activeId = existingNew.id;
+        saveConversations(e, seed);
+        return seed;
+      }
+
+      activeId = Date.now().toString();
+      const newConvo: Conversation = { id: activeId, title: "New Chat", createdAt: Date.now() };
+      const updated = [newConvo, ...seed];
+      saveConversations(e, updated);
+      return updated;
+    });
+
+    if (!activeId) return;
+    setActiveConvoId(activeId);
+    const existingMessages = loadMessages(e, activeId);
+    const initialMsgs = existingMessages.length > 0 ? existingMessages : [WELCOME_MESSAGE];
+    setCitizenMessages(initialMsgs);
+    setProfessionalMessages(initialMsgs);
+    saveMessages(e, activeId, initialMsgs);
+  }, [userEmail]);
+
   useEffect(() => {
     if (isLoggedIn && userEmail) {
       const convos = loadConversations(userEmail);
-      setConversations(convos);
-      if (convos.length > 0) {
-        setActiveConvoId(convos[0].id);
-        setCitizenMessages(loadMessages(userEmail, convos[0].id));
-      } else {
-        createNewConversation(userEmail);
-      }
+      // Keep full history visible, but always start in a fresh chat on each page visit/login.
+      createNewConversation(userEmail, convos);
     } else {
       setConversations([]);
       setActiveConvoId(null);
@@ -99,23 +169,7 @@ function AppContent() {
       setProfessionalMessages([WELCOME_MESSAGE]);
       setSidebarOpen(false);
     }
-  }, [isLoggedIn, userEmail]);
-
-  const createNewConversation = useCallback((email?: string) => {
-    const e = email || userEmail;
-    if (!e) return;
-    const newId = Date.now().toString();
-    const newConvo: Conversation = { id: newId, title: "New Chat", createdAt: Date.now() };
-    setConversations((prev) => {
-      const updated = [newConvo, ...prev];
-      saveConversations(e, updated);
-      return updated;
-    });
-    setActiveConvoId(newId);
-    const initialMsgs = [WELCOME_MESSAGE];
-    setCitizenMessages(initialMsgs);
-    saveMessages(e, newId, initialMsgs);
-  }, [userEmail]);
+  }, [isLoggedIn, userEmail, createNewConversation]);
 
   const selectConversation = useCallback((id: string) => {
     if (!userEmail) return;
@@ -165,8 +219,7 @@ function AppContent() {
           setConversations((prevConversations) => {
             const convo = prevConversations.find((c) => c.id === activeConvoId);
             if (convo && convo.title === "New Chat") {
-              const raw = trimmedText.length > 40 ? trimmedText.slice(0, 40) + "…" : trimmedText;
-              const title = raw.replace(/\b\w/g, (c) => c.toUpperCase());
+              const title = formatConversationTitleFromPrompt(trimmedText);
               const updated = prevConversations.map((c) =>
                 c.id === activeConvoId ? { ...c, title } : c
               );

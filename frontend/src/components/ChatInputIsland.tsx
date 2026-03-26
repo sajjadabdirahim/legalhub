@@ -63,7 +63,7 @@ export function ChatInputIsland({ onSend, isLoading = false, loadingText = "Retr
             <span
               className={cn(
                 "text-xs transition-colors",
-                isAtLimit ? "text-destructive font-medium" : "text-muted-foreground"
+                isAtLimit ? "text-destructive font-medium" : "text-foreground/70"
               )}
               aria-live="polite"
             >
@@ -73,7 +73,7 @@ export function ChatInputIsland({ onSend, isLoading = false, loadingText = "Retr
             {isLoading ? (
               <div className="flex items-center gap-2">
                 <Loader2 className="h-4 w-4 animate-spin-slow text-accent" aria-hidden="true" />
-                <span className="text-xs text-muted-foreground animate-pulse-subtle">
+                <span className="text-xs text-foreground/75 animate-pulse-subtle">
                   {loadingText}
                 </span>
               </div>

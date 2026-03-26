@@ -36,7 +36,7 @@ _ID_LABELED_RE = re.compile(
 
 
 def _allowed_chars(s: str) -> bool:
-    allowed_extra = ".,!?;:'\"()-/&%–—…•°"
+    allowed_extra = ".,!?;:'\"()-/&%–—…•°[]"
     for ch in s:
         if ch.isalnum() or ch.isspace():
             continue

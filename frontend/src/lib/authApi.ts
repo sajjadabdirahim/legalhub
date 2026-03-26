@@ -4,12 +4,18 @@ export type AuthOutcome =
   | { ok: true; email: string }
   | { ok: false; message: string };
 
-function detailMessage(data: { detail?: unknown }): string {
+function detailMessage(data: { detail?: unknown }, status?: number): string {
   const d = data.detail;
-  if (typeof d === "string") return d;
-  if (Array.isArray(d) && d[0] && typeof (d[0] as { msg?: string }).msg === "string") {
-    return (d[0] as { msg: string }).msg;
+  if (typeof d === "string") {
+    if (status) return `${d} (HTTP ${status})`;
+    return d;
   }
+  if (Array.isArray(d) && d[0] && typeof (d[0] as { msg?: string }).msg === "string") {
+    const msg = (d[0] as { msg: string }).msg;
+    if (status) return `${msg} (HTTP ${status})`;
+    return msg;
+  }
+  if (status) return `Request failed (HTTP ${status}).`;
   return "Request failed.";
 }
 
@@ -35,14 +41,17 @@ async function postJson(url: string, body: object): Promise<{ res: Response; dat
     }
     throw e;
   }
-  const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  const data = (await res.json().catch(async () => {
+    const text = await res.text().catch(() => "");
+    return text ? ({ detail: text } as Record<string, unknown>) : ({} as Record<string, unknown>);
+  })) as Record<string, unknown>;
   return { res, data };
 }
 
 export async function registerWithPassword(email: string, password: string): Promise<AuthOutcome> {
   const { res, data } = await postJson(`${getApiBaseUrl()}/api/auth/register`, { email, password });
   if (!res.ok) {
-    return { ok: false, message: detailMessage(data) };
+    return { ok: false, message: detailMessage(data, res.status) };
   }
   const token = data.access_token;
   const em = data.email;
@@ -56,7 +65,7 @@ export async function registerWithPassword(email: string, password: string): Pro
 export async function loginWithPassword(email: string, password: string): Promise<AuthOutcome> {
   const { res, data } = await postJson(`${getApiBaseUrl()}/api/auth/login`, { email, password });
   if (!res.ok) {
-    return { ok: false, message: detailMessage(data) };
+    return { ok: false, message: detailMessage(data, res.status) };
   }
   const token = data.access_token;
   const em = data.email;
@@ -78,7 +87,7 @@ export async function loginWithGoogleCredential(
       : { email: "user@gmail.com" };
   const { res, data } = await postJson(`${getApiBaseUrl()}/api/auth/google`, body);
   if (!res.ok) {
-    return { ok: false, message: detailMessage(data) };
+    return { ok: false, message: detailMessage(data, res.status) };
   }
   const token = data.access_token;
   const em = data.email;
@@ -87,4 +96,35 @@ export async function loginWithGoogleCredential(
   }
   setStoredAccessToken(token);
   return { ok: true, email: em };
+}
+
+export async function requestPasswordReset(
+  email: string
+): Promise<{ ok: boolean; message: string; resetLink?: string }> {
+  const { res, data } = await postJson(`${getApiBaseUrl()}/api/auth/forgot-password`, { email });
+  if (!res.ok) {
+    return { ok: false, message: detailMessage(data, res.status) };
+  }
+  const message = typeof data.message === "string"
+    ? data.message
+    : "If an account exists for that email, a reset link has been sent.";
+  const resetLink = typeof data.reset_link === "string" ? data.reset_link : undefined;
+  return { ok: true, message, resetLink };
+}
+
+export async function resetPasswordWithToken(
+  token: string,
+  newPassword: string
+): Promise<{ ok: boolean; message: string }> {
+  const { res, data } = await postJson(`${getApiBaseUrl()}/api/auth/reset-password`, {
+    token,
+    new_password: newPassword,
+  });
+  if (!res.ok) {
+    return { ok: false, message: detailMessage(data, res.status) };
+  }
+  const message = typeof data.message === "string"
+    ? data.message
+    : "Password updated successfully.";
+  return { ok: true, message };
 }
